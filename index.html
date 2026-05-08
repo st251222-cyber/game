@@ -1,0 +1,499 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>暗闇からの脱出</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body, html {
+            margin: 0; padding: 0; width: 100%; height: 100%;
+            background-color: #050505; color: white;
+            overflow: hidden; touch-action: none;
+            font-family: 'Courier New', Courier, monospace;
+        }
+        #game-canvas {
+            display: block; width: 100%; height: 100%;
+        }
+        #ui-layer {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            pointer-events: none; display: flex; flex-direction: column;
+            justify-content: center; align-items: center;
+        }
+        .overlay-screen {
+            background: rgba(0, 0, 0, 0.85);
+            padding: 2rem; border: 1px solid #333; border-radius: 10px;
+            text-align: center; pointer-events: auto;
+            box-shadow: 0 0 20px rgba(255, 0, 0, 0.1);
+        }
+        .btn {
+            background: #440000; color: #ffaaaa; border: 1px solid #ff0000;
+            padding: 10px 20px; margin-top: 20px; cursor: pointer;
+            font-size: 1.2rem; transition: all 0.3s;
+        }
+        .btn:hover { background: #880000; color: white; box-shadow: 0 0 10px red; }
+        
+        #hud {
+            position: absolute; top: 20px; left: 20px;
+            font-size: 1.5rem; color: #aaa; text-shadow: 0 0 5px black;
+        }
+        
+        /* スマホ用バーチャルパッド */
+        #d-pad {
+            position: absolute; bottom: 30px; left: 30px;
+            width: 150px; height: 150px; pointer-events: auto;
+            display: none; /* タッチデバイスでのみ表示 */
+        }
+        @media (hover: none) and (pointer: coarse) {
+            #d-pad { display: block; }
+        }
+        .pad-btn {
+            position: absolute; width: 45px; height: 45px;
+            background: rgba(255, 255, 255, 0.1); border: 1px solid rgba(255, 255, 255, 0.3);
+            border-radius: 5px; display: flex; justify-content: center; align-items: center;
+            user-select: none; color: rgba(255, 255, 255, 0.5); font-weight: bold;
+        }
+        .pad-btn:active { background: rgba(255, 255, 255, 0.3); }
+        #pad-up { top: 0; left: 52px; }
+        #pad-down { bottom: 0; left: 52px; }
+        #pad-left { top: 52px; left: 0; }
+        #pad-right { top: 52px; right: 0; }
+        
+        /* 恐怖演出用のフラッシュ */
+        #damage-flash {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            background: red; opacity: 0; pointer-events: none; transition: opacity 0.1s;
+        }
+    </style>
+</head>
+<body>
+
+    <canvas id="game-canvas"></canvas>
+    
+    <div id="damage-flash"></div>
+
+    <div id="hud">手がかり: <span id="key-count">0</span>/3</div>
+
+    <div id="hint-display" class="absolute top-24 left-0 w-full flex justify-center pointer-events-none z-50 opacity-0 transition-opacity duration-300">
+        <div id="hint-text" class="bg-black bg-opacity-80 text-white px-6 py-3 rounded border border-gray-600 shadow-lg text-lg">
+            ヒントテキスト
+        </div>
+    </div>
+
+    <div id="ui-layer">
+        <!-- スタート画面 -->
+        <div id="screen-start" class="overlay-screen">
+            <h1 class="text-4xl font-bold mb-4 text-gray-300 tracking-widest">暗闇からの脱出</h1>
+            <p class="text-gray-400 mb-2">館に散らばる3つの「手がかり」を探し出し、<br>出口のパスワードを解読しろ。</p>
+            <p class="text-red-500 mb-6 text-sm">※暗闇に潜む「何か」に注意しろ</p>
+            <p class="text-xs text-gray-500 mb-4">操作: WASD / 矢印キー または 画面左下のパッド</p>
+            <button class="btn" onclick="startGame()">探索を開始する</button>
+        </div>
+
+        <!-- ゲームオーバー画面 -->
+        <div id="screen-gameover" class="overlay-screen hidden">
+            <h1 class="text-5xl font-bold mb-4 text-red-600 tracking-widest">捕まった</h1>
+            <p class="text-gray-400 mb-6">あなたは暗闇に引きずり込まれた...</p>
+            <button class="btn" onclick="resetGame()">もう一度挑む</button>
+        </div>
+
+        <!-- ゲームクリア画面 -->
+        <div id="screen-clear" class="overlay-screen hidden">
+            <h1 class="text-4xl font-bold mb-4 text-blue-400 tracking-widest">脱出成功</h1>
+            <p class="text-gray-300 mb-6">正しいパスワードを入力し、<br>無事に館から逃げ出すことができた。</p>
+            <button class="btn" onclick="resetGame()" style="border-color: #0088ff; color: #88ccff;">再び館へ向かう</button>
+        </div>
+
+        <!-- パスワード入力画面 -->
+        <div id="screen-password" class="overlay-screen hidden pointer-events-auto">
+            <h2 class="text-3xl font-bold mb-4 text-red-500 tracking-widest">電子ロック</h2>
+            <p class="text-gray-300 mb-4">3桁の暗証番号を入力しろ</p>
+            <input type="number" id="password-input" class="bg-black text-white border-2 border-red-900 p-2 text-2xl w-32 text-center focus:outline-none focus:border-red-500 mb-2" oninput="if(this.value.length > 3) this.value=this.value.slice(0,3);">
+            <p id="password-error" class="text-red-500 text-sm mb-4 h-5 opacity-0 transition-opacity">番号が違うようだ…</p>
+            <div>
+                <button class="btn mx-2" onclick="checkPassword()">解除</button>
+                <button class="btn mx-2" onclick="cancelPassword()" style="background: #222; border-color: #555; color: #aaa;">離れる</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- モバイル用D-Pad -->
+    <div id="d-pad">
+        <div id="pad-up" class="pad-btn">W</div>
+        <div id="pad-down" class="pad-btn">S</div>
+        <div id="pad-left" class="pad-btn">A</div>
+        <div id="pad-right" class="pad-btn">D</div>
+    </div>
+
+<script>
+    const canvas = document.getElementById('game-canvas');
+    const ctx = canvas.getContext('2d');
+    const damageFlash = document.getElementById('damage-flash');
+    
+    // UI要素
+    const screenStart = document.getElementById('screen-start');
+    const screenGameOver = document.getElementById('screen-gameover');
+    const screenClear = document.getElementById('screen-clear');
+    const screenPassword = document.getElementById('screen-password');
+    const keyCountText = document.getElementById('key-count');
+    const hintDisplay = document.getElementById('hint-display');
+    const hintText = document.getElementById('hint-text');
+
+    // ゲームの状態
+    let gameState = 'START'; // START, PLAYING, GAMEOVER, CLEAR, PASSWORD
+    let animationId;
+    let hintTimer = null;
+    let correctPassword = "";
+
+    // キー入力状態
+    const keys = { w: false, a: false, s: false, d: false, ArrowUp: false, ArrowDown: false, ArrowLeft: false, ArrowRight: false };
+
+    // マップ定義 (1: 壁, 0: 通路, 3: 出口, 4,5,6: 手がかりのメモ)
+    const mapGrid = [
+        [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1],
+        [1,0,0,0,1,0,4,0,0,0,1,0,0,3,1],
+        [1,0,1,0,1,0,1,1,1,0,1,0,1,1,1],
+        [1,0,1,0,0,0,0,0,1,0,0,0,0,0,1],
+        [1,0,1,1,1,1,1,0,1,1,1,1,1,0,1],
+        [1,0,0,0,0,0,1,0,0,0,0,0,1,0,1],
+        [1,1,1,1,1,0,1,1,1,1,1,0,1,0,1],
+        [1,6,0,0,1,0,0,0,0,0,1,0,0,0,1],
+        [1,1,1,0,1,1,1,1,1,0,1,1,1,0,1],
+        [1,0,0,0,0,0,0,0,1,0,0,0,1,0,1],
+        [1,0,1,1,1,1,1,0,1,1,1,0,1,0,1],
+        [1,0,1,5,0,0,1,0,0,0,1,0,0,0,1],
+        [1,0,1,1,1,0,1,1,1,1,1,1,1,1,1],
+        [1,0,0,0,0,0,0,0,0,0,0,0,0,0,1],
+        [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1]
+    ];
+    let currentMap = [];
+    let tileSize = 40;
+    
+    const TOTAL_KEYS = 3;
+
+    // エンティティ
+    const player = { x: 0, y: 0, radius: 10, speed: 2.5, memosCount: 0, lightRadius: 150, hints: {} };
+    const enemy = { x: 0, y: 0, radius: 12, speed: 1.0, active: false };
+
+    // リサイズ処理
+    function resize() {
+        canvas.width = window.innerWidth;
+        canvas.height = window.innerHeight;
+        // 画面サイズに合わせてタイルサイズを調整
+        const minDimension = Math.min(canvas.width, canvas.height);
+        tileSize = Math.floor(minDimension / 15); // マップが15x15なので
+        if(tileSize < 20) tileSize = 20;
+    }
+    window.addEventListener('resize', resize);
+
+    // 入力イベント設定
+    window.addEventListener('keydown', (e) => { if(keys.hasOwnProperty(e.key)) keys[e.key] = true; });
+    window.addEventListener('keyup', (e) => { if(keys.hasOwnProperty(e.key)) keys[e.key] = false; });
+
+    // タッチ入力設定
+    const setupTouch = (id, keyName) => {
+        const btn = document.getElementById(id);
+        btn.addEventListener('touchstart', (e) => { e.preventDefault(); keys[keyName] = true; });
+        btn.addEventListener('touchend', (e) => { e.preventDefault(); keys[keyName] = false; });
+    };
+    setupTouch('pad-up', 'w');
+    setupTouch('pad-down', 's');
+    setupTouch('pad-left', 'a');
+    setupTouch('pad-right', 'd');
+
+    // マップ初期化とエンティティ配置
+    function initLevel() {
+        currentMap = JSON.parse(JSON.stringify(mapGrid)); // ディープコピー
+        player.memosCount = 0;
+        keyCountText.innerText = player.memosCount;
+        
+        // パスワードの自動生成とヒントの設定
+        const p1 = Math.floor(Math.random() * 10);
+        const p2 = Math.floor(Math.random() * 10);
+        const p3 = Math.floor(Math.random() * 10);
+        correctPassword = `${p1}${p2}${p3}`;
+        player.hints = {
+            4: `血塗られたメモ：「最初の数字は ${p1} だ…」`,
+            5: `破れたメモ：「二番目の数字は ${p2} だと思う…」`,
+            6: `焦げたメモ：「最後の数字は ${p3} のはずだ…」`
+        };
+        
+        // プレイヤー初期位置 (左上)
+        player.x = 1 * tileSize + tileSize / 2;
+        player.y = 1 * tileSize + tileSize / 2;
+        
+        // 敵の初期位置 (右下、少し遅れて起動)
+        enemy.x = 13 * tileSize + tileSize / 2;
+        enemy.y = 13 * tileSize + tileSize / 2;
+        enemy.active = false;
+        setTimeout(() => { enemy.active = true; }, 3000); // 3秒後に徘徊開始
+    }
+
+    // ヒントを表示する関数
+    function showHint(text) {
+        hintText.innerText = text;
+        hintDisplay.classList.remove('opacity-0');
+        
+        if (hintTimer) clearTimeout(hintTimer);
+        hintTimer = setTimeout(() => {
+            hintDisplay.classList.add('opacity-0');
+        }, 4000);
+    }
+
+    // 衝突判定（壁）
+    function checkWallCollision(newX, newY, radius) {
+        // プレイヤーの周囲のバウンディングボックスで判定
+        const left = Math.floor((newX - radius) / tileSize);
+        const right = Math.floor((newX + radius) / tileSize);
+        const top = Math.floor((newY - radius) / tileSize);
+        const bottom = Math.floor((newY + radius) / tileSize);
+
+        for (let y = top; y <= bottom; y++) {
+            for (let x = left; x <= right; x++) {
+                if (currentMap[y] && currentMap[y][x] === 1) {
+                    return true; // 壁に衝突
+                }
+            }
+        }
+        return false;
+    }
+
+    // アイテム収集とゴールの判定
+    function checkInteractions() {
+        const gridX = Math.floor(player.x / tileSize);
+        const gridY = Math.floor(player.y / tileSize);
+
+        if ([4, 5, 6].includes(currentMap[gridY] && currentMap[gridY][gridX])) {
+            // メモ（手がかり）を取得
+            const tileType = currentMap[gridY][gridX];
+            currentMap[gridY][gridX] = 0;
+            player.memosCount++;
+            keyCountText.innerText = player.memosCount;
+            showHint(player.hints[tileType]);
+        } else if (currentMap[gridY] && currentMap[gridY][gridX] === 3) {
+            // ドアに到達
+            // ドアから少し離す（連続で触れて画面が何度も開くのを防ぐため）
+            player.x = 12 * tileSize + tileSize / 2;
+            
+            gameState = 'PASSWORD';
+            screenPassword.classList.remove('hidden');
+            const pwdInput = document.getElementById('password-input');
+            pwdInput.value = "";
+            document.getElementById('password-error').classList.add('opacity-0');
+            setTimeout(() => pwdInput.focus(), 10);
+        }
+    }
+
+    // プレイヤーの移動
+    function updatePlayer() {
+        let dx = 0;
+        let dy = 0;
+        if (keys.w || keys.ArrowUp) dy -= player.speed;
+        if (keys.s || keys.ArrowDown) dy += player.speed;
+        if (keys.a || keys.ArrowLeft) dx -= player.speed;
+        if (keys.d || keys.ArrowRight) dx += player.speed;
+
+        // 斜め移動の速度調整
+        if (dx !== 0 && dy !== 0) {
+            const length = Math.sqrt(dx * dx + dy * dy);
+            dx = (dx / length) * player.speed;
+            dy = (dy / length) * player.speed;
+        }
+
+        if (!checkWallCollision(player.x + dx, player.y, player.radius)) player.x += dx;
+        if (!checkWallCollision(player.x, player.y + dy, player.radius)) player.y += dy;
+
+        checkInteractions();
+    }
+
+    // 敵の移動（壁をゆっくりすり抜けてプレイヤーを追う）
+    function updateEnemy() {
+        if (!enemy.active) return;
+
+        const dx = player.x - enemy.x;
+        const dy = player.y - enemy.y;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+
+        if (dist > 0) {
+            // 壁を無視してプレイヤーへ直進
+            enemy.x += (dx / dist) * enemy.speed;
+            enemy.y += (dy / dist) * enemy.speed;
+        }
+
+        // 捕まったか判定
+        if (dist < player.radius + enemy.radius) {
+            gameState = 'GAMEOVER';
+            screenGameOver.classList.remove('hidden');
+            // 演出
+            damageFlash.style.opacity = '0.5';
+            setTimeout(() => { damageFlash.style.opacity = '0'; }, 500);
+        }
+    }
+
+    // 描画処理
+    function draw() {
+        // 背景クリア
+        ctx.fillStyle = '#111'; // 真っ暗ではない下地
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+        // カメラ（画面中心にプレイヤー）のオフセット計算
+        const offsetX = canvas.width / 2 - player.x;
+        const offsetY = canvas.height / 2 - player.y;
+
+        ctx.save();
+        ctx.translate(offsetX, offsetY);
+
+        // マップ描画
+        for (let y = 0; y < currentMap.length; y++) {
+            for (let x = 0; x < currentMap[y].length; x++) {
+                const tile = currentMap[y][x];
+                const tx = x * tileSize;
+                const ty = y * tileSize;
+
+                if (tile === 1) {
+                    ctx.fillStyle = '#222'; // 壁
+                    ctx.fillRect(tx, ty, tileSize, tileSize);
+                    // 壁の枠線
+                    ctx.strokeStyle = '#000';
+                    ctx.strokeRect(tx, ty, tileSize, tileSize);
+                } else if ([4, 5, 6].includes(tile)) {
+                    // メモ（手がかり）
+                    ctx.fillStyle = '#ddd';
+                    ctx.fillRect(tx + tileSize * 0.3, ty + tileSize * 0.3, tileSize * 0.4, tileSize * 0.4);
+                    // メモの線
+                    ctx.strokeStyle = '#333';
+                    ctx.beginPath();
+                    ctx.moveTo(tx + tileSize * 0.4, ty + tileSize * 0.4);
+                    ctx.lineTo(tx + tileSize * 0.6, ty + tileSize * 0.4);
+                    ctx.moveTo(tx + tileSize * 0.4, ty + tileSize * 0.6);
+                    ctx.lineTo(tx + tileSize * 0.6, ty + tileSize * 0.6);
+                    ctx.stroke();
+                } else if (tile === 3) {
+                    // 出口（電子ロック扉）
+                    ctx.fillStyle = '#444';
+                    ctx.fillRect(tx, ty, tileSize, tileSize);
+                    // ロックのランプ
+                    ctx.fillStyle = player.memosCount >= TOTAL_KEYS ? '#ffaa00' : '#ff0000';
+                    ctx.beginPath();
+                    ctx.arc(tx + tileSize/2, ty + tileSize/2, tileSize/6, 0, Math.PI * 2);
+                    ctx.fill();
+                }
+            }
+        }
+
+        // 敵の描画
+        if (enemy.active) {
+            ctx.fillStyle = 'rgba(255, 0, 0, 0.7)';
+            ctx.beginPath();
+            // 呼吸するように少しサイズを変える
+            const pulse = Math.sin(Date.now() / 150) * 2; 
+            ctx.arc(enemy.x, enemy.y, enemy.radius + pulse, 0, Math.PI * 2);
+            ctx.fill();
+        }
+
+        // プレイヤーの描画
+        ctx.fillStyle = 'white';
+        ctx.beginPath();
+        ctx.arc(player.x, player.y, player.radius, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.restore();
+
+        // ---- 視界（ライト）の描画処理 ----
+        // プレイヤーまでの距離に応じて敵の接近を検知し、ライトを点滅させる演出
+        const distToEnemy = Math.sqrt(Math.pow(player.x - enemy.x, 2) + Math.pow(player.y - enemy.y, 2));
+        let currentLightRadius = player.lightRadius;
+        
+        if (enemy.active && distToEnemy < 250) {
+            // 敵が近づくとライトがチカチカする
+            currentLightRadius += (Math.random() - 0.5) * 30;
+        }
+
+        // 画面全体を覆う暗闇のパスを作成し、プレイヤーの周りだけ穴を開ける
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.95)'; // 暗闇の濃さ
+        ctx.beginPath();
+        // 外側の四角形（時計回り）
+        ctx.rect(0, 0, canvas.width, canvas.height);
+        // 内側の円（反時計回りで作ると穴が開く）
+        ctx.arc(canvas.width / 2, canvas.height / 2, currentLightRadius, 0, Math.PI * 2, true);
+        ctx.fill();
+
+        // ライトのエッジをグラデーションで滑らかにする
+        const gradient = ctx.createRadialGradient(
+            canvas.width / 2, canvas.height / 2, currentLightRadius * 0.5,
+            canvas.width / 2, canvas.height / 2, currentLightRadius
+        );
+        gradient.addColorStop(0, 'rgba(0, 0, 0, 0)');
+        gradient.addColorStop(1, 'rgba(0, 0, 0, 0.95)');
+        
+        ctx.fillStyle = gradient;
+        ctx.beginPath();
+        ctx.arc(canvas.width / 2, canvas.height / 2, currentLightRadius, 0, Math.PI * 2);
+        ctx.fill();
+    }
+
+    // メインループ
+    function gameLoop() {
+        if (gameState === 'PLAYING') {
+            updatePlayer();
+            updateEnemy();
+            draw();
+            animationId = requestAnimationFrame(gameLoop);
+        } else if (gameState === 'GAMEOVER' || gameState === 'CLEAR' || gameState === 'PASSWORD') {
+            // 停止中は描画のみ更新（PASSWORD入力中も背景は描画したまま敵の動きは止まる）
+            draw();
+            if (gameState === 'PASSWORD') {
+                 animationId = requestAnimationFrame(gameLoop);
+            }
+        }
+    }
+
+    // ゲーム制御関数
+    window.startGame = function() {
+        gameState = 'PLAYING';
+        screenStart.classList.add('hidden');
+        resize();
+        initLevel();
+        gameLoop();
+    };
+
+    window.resetGame = function() {
+        screenGameOver.classList.add('hidden');
+        screenClear.classList.add('hidden');
+        screenPassword.classList.add('hidden');
+        damageFlash.style.opacity = '0';
+        hintDisplay.classList.add('opacity-0');
+        gameState = 'PLAYING';
+        initLevel();
+        gameLoop();
+    };
+
+    window.checkPassword = function() {
+        const inputVal = document.getElementById('password-input').value;
+        if (inputVal === correctPassword) {
+            screenPassword.classList.add('hidden');
+            gameState = 'CLEAR';
+            screenClear.classList.remove('hidden');
+        } else {
+            const errorMsg = document.getElementById('password-error');
+            errorMsg.classList.remove('opacity-0');
+            setTimeout(() => { errorMsg.classList.add('opacity-0'); }, 2000);
+        }
+    };
+
+    window.cancelPassword = function() {
+        screenPassword.classList.add('hidden');
+        // ドアから離れる方向に少し押し戻すのは checkInteractions で実施済み
+        gameState = 'PLAYING';
+        // 入力キーをリセットして意図せぬ移動を防ぐ
+        for (let key in keys) keys[key] = false;
+    };
+
+    // 初期化
+    resize();
+    ctx.fillStyle = 'black';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+</script>
+</body>
+</html>
