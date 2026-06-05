@@ -149,6 +149,7 @@
     const keys = { w: false, a: false, s: false, d: false, ArrowUp: false, ArrowDown: false, ArrowLeft: false, ArrowRight: false };
 
     // マップ定義 (1: 壁, 0: 通路, 3: 出口, 4,5,6: 手がかりのメモ)
+    // 進行不能を解消するため、壁を壊して通路を接続しました。
     const mapGrid = [
         [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1],
         [1,0,0,0,1,0,4,0,0,0,1,0,0,3,1],
@@ -157,11 +158,11 @@
         [1,0,1,1,1,1,1,0,1,1,1,1,1,0,1],
         [1,0,0,0,0,0,1,0,0,0,0,0,1,0,1],
         [1,1,1,1,1,0,1,1,1,1,1,0,1,0,1],
-        [1,6,0,0,1,0,0,0,0,0,1,0,0,0,1],
+        [1,6,0,0,0,0,0,0,0,0,1,0,0,0,1], // (7,4)の壁を壊し、左の手がかり「6」の部屋を中央エリアに接続
         [1,1,1,0,1,1,1,1,1,0,1,1,1,0,1],
         [1,0,0,0,0,0,0,0,1,0,0,0,1,0,1],
         [1,0,1,1,1,1,1,0,1,1,1,0,1,0,1],
-        [1,0,1,5,0,0,1,0,0,0,1,0,0,0,1],
+        [1,0,1,5,0,0,0,0,0,0,1,0,0,0,1], // (11,6)の壁を壊し、手がかり「5」のエリアを右側エリアに接続
         [1,0,1,1,1,0,1,1,1,1,1,1,1,1,1],
         [1,0,0,0,0,0,0,0,0,0,0,0,0,0,1],
         [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1]
@@ -179,9 +180,8 @@
     function resize() {
         canvas.width = window.innerWidth;
         canvas.height = window.innerHeight;
-        // 画面サイズに合わせてタイルサイズを調整
         const minDimension = Math.min(canvas.width, canvas.height);
-        tileSize = Math.floor(minDimension / 15); // マップが15x15なので
+        tileSize = Math.floor(minDimension / 15);
         if(tileSize < 20) tileSize = 20;
     }
     window.addEventListener('resize', resize);
@@ -193,8 +193,10 @@
     // タッチ入力設定
     const setupTouch = (id, keyName) => {
         const btn = document.getElementById(id);
-        btn.addEventListener('touchstart', (e) => { e.preventDefault(); keys[keyName] = true; });
-        btn.addEventListener('touchend', (e) => { e.preventDefault(); keys[keyName] = false; });
+        if(btn) {
+            btn.addEventListener('touchstart', (e) => { e.preventDefault(); keys[keyName] = true; });
+            btn.addEventListener('touchend', (e) => { e.preventDefault(); keys[keyName] = false; });
+        }
     };
     setupTouch('pad-up', 'w');
     setupTouch('pad-down', 's');
@@ -203,11 +205,10 @@
 
     // マップ初期化とエンティティ配置
     function initLevel() {
-        currentMap = JSON.parse(JSON.stringify(mapGrid)); // ディープコピー
+        currentMap = JSON.parse(JSON.stringify(mapGrid));
         player.memosCount = 0;
         keyCountText.innerText = player.memosCount;
         
-        // パスワードの自動生成とヒントの設定
         const p1 = Math.floor(Math.random() * 10);
         const p2 = Math.floor(Math.random() * 10);
         const p3 = Math.floor(Math.random() * 10);
@@ -218,18 +219,18 @@
             6: `焦げたメモ：「最後の数字は ${p3} のはずだ…」`
         };
         
-        // プレイヤー初期位置 (左上)
         player.x = 1 * tileSize + tileSize / 2;
         player.y = 1 * tileSize + tileSize / 2;
         
-        // 敵の初期位置 (右下、少し遅れて起動)
         enemy.x = 13 * tileSize + tileSize / 2;
         enemy.y = 13 * tileSize + tileSize / 2;
         enemy.active = false;
-        setTimeout(() => { enemy.active = true; }, 3000); // 3秒後に徘徊開始
+        
+        setTimeout(() => { 
+            if (gameState === 'PLAYING') enemy.active = true; 
+        }, 3000);
     }
 
-    // ヒントを表示する関数
     function showHint(text) {
         hintText.innerText = text;
         hintDisplay.classList.remove('opacity-0');
@@ -242,7 +243,6 @@
 
     // 衝突判定（壁）
     function checkWallCollision(newX, newY, radius) {
-        // プレイヤーの周囲のバウンディングボックスで判定
         const left = Math.floor((newX - radius) / tileSize);
         const right = Math.floor((newX + radius) / tileSize);
         const top = Math.floor((newY - radius) / tileSize);
@@ -251,7 +251,7 @@
         for (let y = top; y <= bottom; y++) {
             for (let x = left; x <= right; x++) {
                 if (currentMap[y] && currentMap[y][x] === 1) {
-                    return true; // 壁に衝突
+                    return true;
                 }
             }
         }
@@ -263,16 +263,13 @@
         const gridX = Math.floor(player.x / tileSize);
         const gridY = Math.floor(player.y / tileSize);
 
-        if ([4, 5, 6].includes(currentMap[gridY] && currentMap[gridY][gridX])) {
-            // メモ（手がかり）を取得
+        if (currentMap[gridY] && [4, 5, 6].includes(currentMap[gridY][gridX])) {
             const tileType = currentMap[gridY][gridX];
             currentMap[gridY][gridX] = 0;
             player.memosCount++;
             keyCountText.innerText = player.memosCount;
             showHint(player.hints[tileType]);
         } else if (currentMap[gridY] && currentMap[gridY][gridX] === 3) {
-            // ドアに到達
-            // ドアから少し離す（連続で触れて画面が何度も開くのを防ぐため）
             player.x = 12 * tileSize + tileSize / 2;
             
             gameState = 'PASSWORD';
@@ -293,7 +290,6 @@
         if (keys.a || keys.ArrowLeft) dx -= player.speed;
         if (keys.d || keys.ArrowRight) dx += player.speed;
 
-        // 斜め移動の速度調整
         if (dx !== 0 && dy !== 0) {
             const length = Math.sqrt(dx * dx + dy * dy);
             dx = (dx / length) * player.speed;
@@ -306,7 +302,7 @@
         checkInteractions();
     }
 
-    // 敵の移動（壁をゆっくりすり抜けてプレイヤーを追う）
+    // 敵の移動
     function updateEnemy() {
         if (!enemy.active) return;
 
@@ -315,16 +311,13 @@
         const dist = Math.sqrt(dx * dx + dy * dy);
 
         if (dist > 0) {
-            // 壁を無視してプレイヤーへ直進
             enemy.x += (dx / dist) * enemy.speed;
             enemy.y += (dy / dist) * enemy.speed;
         }
 
-        // 捕まったか判定
         if (dist < player.radius + enemy.radius) {
             gameState = 'GAMEOVER';
             screenGameOver.classList.remove('hidden');
-            // 演出
             damageFlash.style.opacity = '0.5';
             setTimeout(() => { damageFlash.style.opacity = '0'; }, 500);
         }
@@ -332,18 +325,15 @@
 
     // 描画処理
     function draw() {
-        // 背景クリア
-        ctx.fillStyle = '#111'; // 真っ暗ではない下地
+        ctx.fillStyle = '#111';
         ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-        // カメラ（画面中心にプレイヤー）のオフセット計算
         const offsetX = canvas.width / 2 - player.x;
         const offsetY = canvas.height / 2 - player.y;
 
         ctx.save();
         ctx.translate(offsetX, offsetY);
 
-        // マップ描画
         for (let y = 0; y < currentMap.length; y++) {
             for (let x = 0; x < currentMap[y].length; x++) {
                 const tile = currentMap[y][x];
@@ -351,16 +341,13 @@
                 const ty = y * tileSize;
 
                 if (tile === 1) {
-                    ctx.fillStyle = '#222'; // 壁
+                    ctx.fillStyle = '#222';
                     ctx.fillRect(tx, ty, tileSize, tileSize);
-                    // 壁の枠線
                     ctx.strokeStyle = '#000';
                     ctx.strokeRect(tx, ty, tileSize, tileSize);
                 } else if ([4, 5, 6].includes(tile)) {
-                    // メモ（手がかり）
                     ctx.fillStyle = '#ddd';
                     ctx.fillRect(tx + tileSize * 0.3, ty + tileSize * 0.3, tileSize * 0.4, tileSize * 0.4);
-                    // メモの線
                     ctx.strokeStyle = '#333';
                     ctx.beginPath();
                     ctx.moveTo(tx + tileSize * 0.4, ty + tileSize * 0.4);
@@ -369,10 +356,8 @@
                     ctx.lineTo(tx + tileSize * 0.6, ty + tileSize * 0.6);
                     ctx.stroke();
                 } else if (tile === 3) {
-                    // 出口（電子ロック扉）
                     ctx.fillStyle = '#444';
                     ctx.fillRect(tx, ty, tileSize, tileSize);
-                    // ロックのランプ
                     ctx.fillStyle = player.memosCount >= TOTAL_KEYS ? '#ffaa00' : '#ff0000';
                     ctx.beginPath();
                     ctx.arc(tx + tileSize/2, ty + tileSize/2, tileSize/6, 0, Math.PI * 2);
@@ -381,17 +366,14 @@
             }
         }
 
-        // 敵の描画
         if (enemy.active) {
             ctx.fillStyle = 'rgba(255, 0, 0, 0.7)';
             ctx.beginPath();
-            // 呼吸するように少しサイズを変える
             const pulse = Math.sin(Date.now() / 150) * 2; 
             ctx.arc(enemy.x, enemy.y, enemy.radius + pulse, 0, Math.PI * 2);
             ctx.fill();
         }
 
-        // プレイヤーの描画
         ctx.fillStyle = 'white';
         ctx.beginPath();
         ctx.arc(player.x, player.y, player.radius, 0, Math.PI * 2);
@@ -399,26 +381,19 @@
 
         ctx.restore();
 
-        // ---- 視界（ライト）の描画処理 ----
-        // プレイヤーまでの距離に応じて敵の接近を検知し、ライトを点滅させる演出
         const distToEnemy = Math.sqrt(Math.pow(player.x - enemy.x, 2) + Math.pow(player.y - enemy.y, 2));
         let currentLightRadius = player.lightRadius;
         
         if (enemy.active && distToEnemy < 250) {
-            // 敵が近づくとライトがチカチカする
             currentLightRadius += (Math.random() - 0.5) * 30;
         }
 
-        // 画面全体を覆う暗闇のパスを作成し、プレイヤーの周りだけ穴を開ける
-        ctx.fillStyle = 'rgba(0, 0, 0, 0.95)'; // 暗闇の濃さ
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.95)';
         ctx.beginPath();
-        // 外側の四角形（時計回り）
         ctx.rect(0, 0, canvas.width, canvas.height);
-        // 内側の円（反時計回りで作ると穴が開く）
         ctx.arc(canvas.width / 2, canvas.height / 2, currentLightRadius, 0, Math.PI * 2, true);
         ctx.fill();
 
-        // ライトのエッジをグラデーションで滑らかにする
         const gradient = ctx.createRadialGradient(
             canvas.width / 2, canvas.height / 2, currentLightRadius * 0.5,
             canvas.width / 2, canvas.height / 2, currentLightRadius
@@ -432,7 +407,6 @@
         ctx.fill();
     }
 
-    // メインループ
     function gameLoop() {
         if (gameState === 'PLAYING') {
             updatePlayer();
@@ -440,7 +414,6 @@
             draw();
             animationId = requestAnimationFrame(gameLoop);
         } else if (gameState === 'GAMEOVER' || gameState === 'CLEAR' || gameState === 'PASSWORD') {
-            // 停止中は描画のみ更新（PASSWORD入力中も背景は描画したまま敵の動きは止まる）
             draw();
             if (gameState === 'PASSWORD') {
                  animationId = requestAnimationFrame(gameLoop);
@@ -448,7 +421,6 @@
         }
     }
 
-    // ゲーム制御関数
     window.startGame = function() {
         gameState = 'PLAYING';
         screenStart.classList.add('hidden');
@@ -483,17 +455,13 @@
 
     window.cancelPassword = function() {
         screenPassword.classList.add('hidden');
-        // ドアから離れる方向に少し押し戻すのは checkInteractions で実施済み
         gameState = 'PLAYING';
-        // 入力キーをリセットして意図せぬ移動を防ぐ
         for (let key in keys) keys[key] = false;
     };
 
-    // 初期化
     resize();
     ctx.fillStyle = 'black';
     ctx.fillRect(0, 0, canvas.width, canvas.height);
-
 </script>
 </body>
 </html>
